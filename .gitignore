@@ -1,0 +1,17 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+*.enc
+*.bin
+*.dec
+plain.txt
+decoded.txt
+ciphertext_only.bin
+iv.bin
