@@ -1,5 +1,7 @@
 import contextlib
 import io
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,6 +50,14 @@ class Sprint2ModeTests(unittest.TestCase):
                 self.assertEqual(len(encrypted), len(self.data))
                 self.assertEqual(decrypted, self.data)
 
+    def test_stream_modes_reject_empty_ciphertext(self):
+        modes = [decrypt_cfb, decrypt_ofb, decrypt_ctr]
+
+        for decrypt_func in modes:
+            with self.subTest(mode=decrypt_func.__name__):
+                with self.assertRaises(ValueError):
+                    decrypt_func(b"", self.key, self.iv)
+
     def test_cfb_matches_pycryptodome(self):
         expected = AES.new(
             self.key,
@@ -89,22 +99,23 @@ class Sprint2CliTests(unittest.TestCase):
                     plain_file.write_bytes(source_data)
 
                     with contextlib.redirect_stdout(io.StringIO()):
-                        encrypt_code = main([
-                            "--algorithm", "aes",
-                            "--mode", mode,
-                            "--encrypt",
-                            "--key", key,
-                            "--input", str(plain_file),
-                            "--output", str(cipher_file),
-                        ])
-                        decrypt_code = main([
-                            "--algorithm", "aes",
-                            "--mode", mode,
-                            "--decrypt",
-                            "--key", key,
-                            "--input", str(cipher_file),
-                            "--output", str(decoded_file),
-                        ])
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            encrypt_code = main([
+                                "--algorithm", "aes",
+                                "--mode", mode,
+                                "--encrypt",
+                                "--key", key,
+                                "--input", str(plain_file),
+                                "--output", str(cipher_file),
+                            ])
+                            decrypt_code = main([
+                                "--algorithm", "aes",
+                                "--mode", mode,
+                                "--decrypt",
+                                "--key", key,
+                                "--input", str(cipher_file),
+                                "--output", str(decoded_file),
+                            ])
 
                     self.assertEqual(encrypt_code, 0)
                     self.assertEqual(decrypt_code, 0)
@@ -129,29 +140,31 @@ class Sprint2CliTests(unittest.TestCase):
             plain_file.write_bytes(source_data)
 
             with contextlib.redirect_stdout(io.StringIO()):
-                encrypt_code = main([
-                    "--algorithm", "aes",
-                    "--mode", "cbc",
-                    "--encrypt",
-                    "--key", key,
-                    "--input", str(plain_file),
-                    "--output", str(cipher_file),
-                ])
+                with contextlib.redirect_stderr(io.StringIO()):
+                    encrypt_code = main([
+                        "--algorithm", "aes",
+                        "--mode", "cbc",
+                        "--encrypt",
+                        "--key", key,
+                        "--input", str(plain_file),
+                        "--output", str(cipher_file),
+                    ])
 
             encrypted_data = cipher_file.read_bytes()
             iv = encrypted_data[:BLOCK_SIZE].hex()
             cipher_without_iv.write_bytes(encrypted_data[BLOCK_SIZE:])
 
             with contextlib.redirect_stdout(io.StringIO()):
-                decrypt_code = main([
-                    "--algorithm", "aes",
-                    "--mode", "cbc",
-                    "--decrypt",
-                    "--key", key,
-                    "--iv", iv,
-                    "--input", str(cipher_without_iv),
-                    "--output", str(decoded_file),
-                ])
+                with contextlib.redirect_stderr(io.StringIO()):
+                    decrypt_code = main([
+                        "--algorithm", "aes",
+                        "--mode", "cbc",
+                        "--decrypt",
+                        "--key", key,
+                        "--iv", iv,
+                        "--input", str(cipher_without_iv),
+                        "--output", str(decoded_file),
+                    ])
 
             self.assertEqual(encrypt_code, 0)
             self.assertEqual(decrypt_code, 0)
@@ -176,6 +189,91 @@ class Sprint2CliTests(unittest.TestCase):
                     ])
 
             self.assertEqual(error.exception.code, 2)
+
+
+@unittest.skipUnless(shutil.which("openssl"), "OpenSSL не найден в PATH")
+class OpenSslInteropTests(unittest.TestCase):
+    def setUp(self):
+        self.key = "000102030405060708090a0b0c0d0e0f"
+        self.iv = "aabbccddeeff00112233445566778899"
+        self.data = b"OpenSSL interop test data\nsecond line"
+        self.modes = ["cbc", "cfb", "ofb", "ctr"]
+
+    def run_openssl(self, args):
+        subprocess.run(["openssl", *args], check=True)
+
+    def test_tool_to_openssl(self):
+        for mode in self.modes:
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    plain_file = temp_path / "plain.txt"
+                    tool_cipher_file = temp_path / "tool_cipher.bin"
+                    ciphertext_only_file = temp_path / "ciphertext_only.bin"
+                    openssl_decoded_file = temp_path / "openssl_decoded.txt"
+                    plain_file.write_bytes(self.data)
+
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            code = main([
+                                "--algorithm", "aes",
+                                "--mode", mode,
+                                "--encrypt",
+                                "--key", self.key,
+                                "--input", str(plain_file),
+                                "--output", str(tool_cipher_file),
+                            ])
+
+                    encrypted = tool_cipher_file.read_bytes()
+                    iv = encrypted[:BLOCK_SIZE].hex()
+                    ciphertext_only_file.write_bytes(encrypted[BLOCK_SIZE:])
+
+                    self.run_openssl([
+                        "enc",
+                        f"-aes-128-{mode}",
+                        "-d",
+                        "-K", self.key,
+                        "-iv", iv,
+                        "-in", str(ciphertext_only_file),
+                        "-out", str(openssl_decoded_file),
+                    ])
+
+                    self.assertEqual(code, 0)
+                    self.assertEqual(openssl_decoded_file.read_bytes(), self.data)
+
+    def test_openssl_to_tool(self):
+        for mode in self.modes:
+            with self.subTest(mode=mode):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    temp_path = Path(temp_dir)
+                    plain_file = temp_path / "plain.txt"
+                    openssl_cipher_file = temp_path / "openssl_cipher.bin"
+                    tool_decoded_file = temp_path / "tool_decoded.txt"
+                    plain_file.write_bytes(self.data)
+
+                    self.run_openssl([
+                        "enc",
+                        f"-aes-128-{mode}",
+                        "-K", self.key,
+                        "-iv", self.iv,
+                        "-in", str(plain_file),
+                        "-out", str(openssl_cipher_file),
+                    ])
+
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            code = main([
+                                "--algorithm", "aes",
+                                "--mode", mode,
+                                "--decrypt",
+                                "--key", self.key,
+                                "--iv", self.iv,
+                                "--input", str(openssl_cipher_file),
+                                "--output", str(tool_decoded_file),
+                            ])
+
+                    self.assertEqual(code, 0)
+                    self.assertEqual(tool_decoded_file.read_bytes(), self.data)
 
 
 if __name__ == "__main__":

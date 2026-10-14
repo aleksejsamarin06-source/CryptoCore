@@ -1,17 +1,14 @@
 import argparse
-import os
 import sys
+from pathlib import Path
 
+from cryptocore.csprng import generate_random_bytes
 from cryptocore.file_io import read_file, write_file
-from cryptocore.modes.cbc import decrypt_cbc, encrypt_cbc
-from cryptocore.modes.cfb import decrypt_cfb, encrypt_cfb
-from cryptocore.modes.ctr import decrypt_ctr, encrypt_ctr
-from cryptocore.modes.ecb import decrypt_ecb, encrypt_ecb
-from cryptocore.modes.ofb import decrypt_ofb, encrypt_ofb
+from cryptocore.hash import SUPPORTED_HASHES, hash_file
+from cryptocore.modes import SUPPORTED_MODES
+from cryptocore.modes import decrypt_cbc, decrypt_cfb, decrypt_ctr, decrypt_ecb, decrypt_ofb
+from cryptocore.modes import encrypt_cbc, encrypt_cfb, encrypt_ctr, encrypt_ecb, encrypt_ofb
 from cryptocore.padding import BLOCK_SIZE
-
-
-SUPPORTED_MODES = ("ecb", "cbc", "cfb", "ofb", "ctr")
 
 
 def setup_output_encoding() -> None:
@@ -48,13 +45,37 @@ def parse_iv(iv_hex: str) -> bytes:
         raise ValueError("IV должен содержать только шестнадцатеричные символы") from error
 
 
+def key_looks_weak(key: bytes) -> bool:
+    if key == bytes(len(key)):
+        return True
+
+    sequential_up = bytes(range(len(key)))
+    sequential_down = bytes(range(len(key) - 1, -1, -1))
+    return key == sequential_up or key == sequential_down
+
+
+def get_key_for_operation(args: argparse.Namespace, parser: argparse.ArgumentParser) -> bytes:
+    if args.key:
+        key = parse_key(args.key)
+        if key_looks_weak(key):
+            print("Предупреждение: ключ выглядит слабым", file=sys.stderr)
+        return key
+
+    if args.decrypt:
+        parser.error("для расшифрования нужно указать --key")
+
+    key = generate_random_bytes(BLOCK_SIZE)
+    print(f"Сгенерирован случайный ключ: {key.hex()}")
+    return key
+
+
 def make_output_name(input_path: str, encrypt: bool) -> str:
     if encrypt:
         return f"{input_path}.enc"
     return f"{input_path}.dec"
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_crypto_parser() -> argparse.ArgumentParser:
     parser = RussianArgumentParser(
         prog="cryptocore",
         description="Минимальная утилита для AES-128",
@@ -67,6 +88,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--iv", help="IV в hex-формате для расшифрования")
     parser.add_argument("--input", help="путь к входному файлу")
     parser.add_argument("--output", help="путь к выходному файлу")
+    return parser
+
+
+def build_digest_parser() -> argparse.ArgumentParser:
+    parser = RussianArgumentParser(
+        prog="cryptocore dgst",
+        description="Вычисление хеша файла",
+    )
+    parser.add_argument("--algorithm", choices=SUPPORTED_HASHES, required=True)
+    parser.add_argument("--input", required=True, help="путь к входному файлу")
+    parser.add_argument("--output", help="путь к файлу для записи результата")
     return parser
 
 
@@ -86,9 +118,6 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     if args.mode == "ecb" and args.iv:
         parser.error("--iv не используется в режиме ecb")
 
-    if not args.key:
-        parser.error("нужно указать --key")
-
     if not args.input:
         parser.error("нужно указать --input")
 
@@ -97,7 +126,7 @@ def encrypt_data(mode: str, data: bytes, key: bytes) -> bytes:
     if mode == "ecb":
         return encrypt_ecb(data, key)
 
-    iv = os.urandom(BLOCK_SIZE)
+    iv = generate_random_bytes(BLOCK_SIZE)
 
     if mode == "cbc":
         encrypted_data = encrypt_cbc(data, key, iv)
@@ -141,15 +170,43 @@ def decrypt_data(mode: str, data: bytes, key: bytes, iv_text: str | None) -> byt
     raise ValueError("Неподдерживаемый режим")
 
 
+def run_digest(argv: list[str]) -> int:
+    parser = build_digest_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        digest = hash_file(args.algorithm, args.input)
+        result = f"{digest}  {args.input}\n"
+
+        if args.output:
+            try:
+                Path(args.output).write_text(result, encoding="utf-8")
+            except OSError as error:
+                raise OSError(f"Не удалось записать файл '{args.output}': {error}") from error
+        else:
+            print(result, end="")
+
+        return 0
+    except (ValueError, OSError) as error:
+        print(f"Ошибка: {error}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     setup_output_encoding()
 
-    parser = build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] == "dgst":
+        return run_digest(argv[1:])
+
+    parser = build_crypto_parser()
     args = parser.parse_args(argv)
     validate_args(args, parser)
 
     try:
-        key = parse_key(args.key)
+        key = get_key_for_operation(args, parser)
         input_data = read_file(args.input)
 
         if args.encrypt:

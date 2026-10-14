@@ -20,22 +20,23 @@ class CliTests(unittest.TestCase):
             plain_file.write_bytes(source_data)
 
             with contextlib.redirect_stdout(io.StringIO()):
-                encrypt_code = main([
-                    "--algorithm", "aes",
-                    "--mode", "ecb",
-                    "--encrypt",
-                    "--key", key,
-                    "--input", str(plain_file),
-                    "--output", str(cipher_file),
-                ])
-                decrypt_code = main([
-                    "--algorithm", "aes",
-                    "--mode", "ecb",
-                    "--decrypt",
-                    "--key", key,
-                    "--input", str(cipher_file),
-                    "--output", str(decoded_file),
-                ])
+                with contextlib.redirect_stderr(io.StringIO()):
+                    encrypt_code = main([
+                        "--algorithm", "aes",
+                        "--mode", "ecb",
+                        "--encrypt",
+                        "--key", key,
+                        "--input", str(plain_file),
+                        "--output", str(cipher_file),
+                    ])
+                    decrypt_code = main([
+                        "--algorithm", "aes",
+                        "--mode", "ecb",
+                        "--decrypt",
+                        "--key", key,
+                        "--input", str(cipher_file),
+                        "--output", str(decoded_file),
+                    ])
 
             self.assertEqual(encrypt_code, 0)
             self.assertEqual(decrypt_code, 0)

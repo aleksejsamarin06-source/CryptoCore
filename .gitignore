@@ -15,3 +15,4 @@ plain.txt
 decoded.txt
 ciphertext_only.bin
 iv.bin
+nist_test_data.bin

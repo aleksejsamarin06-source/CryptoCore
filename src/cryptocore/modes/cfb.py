@@ -1,6 +1,7 @@
 from cryptocore.aes_block import encrypt_block
 from cryptocore.bytes_utils import split_blocks, xor_bytes
 from cryptocore.padding import BLOCK_SIZE
+from cryptocore.modes.stream import check_stream_mode_input
 
 
 def encrypt_cfb(data: bytes, key: bytes, iv: bytes) -> bytes:
@@ -20,8 +21,7 @@ def encrypt_cfb(data: bytes, key: bytes, iv: bytes) -> bytes:
 
 
 def decrypt_cfb(data: bytes, key: bytes, iv: bytes) -> bytes:
-    if len(iv) != BLOCK_SIZE:
-        raise ValueError("IV должен быть длиной 16 байт")
+    check_stream_mode_input(data, iv)
 
     result = []
     previous_block = iv

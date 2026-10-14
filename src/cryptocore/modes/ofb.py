@@ -1,6 +1,7 @@
 from cryptocore.aes_block import encrypt_block
 from cryptocore.bytes_utils import split_blocks, xor_bytes
 from cryptocore.padding import BLOCK_SIZE
+from cryptocore.modes.stream import check_stream_mode_input
 
 
 def encrypt_ofb(data: bytes, key: bytes, iv: bytes) -> bytes:
@@ -18,4 +19,5 @@ def encrypt_ofb(data: bytes, key: bytes, iv: bytes) -> bytes:
 
 
 def decrypt_ofb(data: bytes, key: bytes, iv: bytes) -> bytes:
+    check_stream_mode_input(data, iv)
     return encrypt_ofb(data, key, iv)
