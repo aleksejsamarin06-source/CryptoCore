@@ -2,10 +2,10 @@ from cryptocore.modes.cbc import decrypt_cbc, encrypt_cbc
 from cryptocore.modes.cfb import decrypt_cfb, encrypt_cfb
 from cryptocore.modes.ctr import decrypt_ctr, encrypt_ctr
 from cryptocore.modes.ecb import decrypt_ecb, encrypt_ecb
+from cryptocore.modes.gcm import AuthenticationError, GCM
 from cryptocore.modes.ofb import decrypt_ofb, encrypt_ofb
 
-
-SUPPORTED_MODES = ("ecb", "cbc", "cfb", "ofb", "ctr")
+SUPPORTED_MODES = ("ecb", "cbc", "cfb", "ofb", "ctr", "gcm")
 
 __all__ = [
     "SUPPORTED_MODES",
@@ -19,4 +19,6 @@ __all__ = [
     "decrypt_ofb",
     "encrypt_ctr",
     "decrypt_ctr",
+    "GCM",
+    "AuthenticationError",
 ]
